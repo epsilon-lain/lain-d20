@@ -1,5 +1,5 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js";
-import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/loaders/GLTFLoader.js";
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const ROLL_STATES = Object.freeze({
   IDLE: "idle",
@@ -13,6 +13,7 @@ const REVEAL_DELAY_MS = 240;
 const FACE_CALIBRATION_EULER = new THREE.Euler(0, 0, 0);
 
 const ui = {
+  diceStage: document.querySelector(".dice-stage"),
   stage: document.getElementById("threeCanvas"),
   rollButton: document.getElementById("rollButton"),
   helperText: document.getElementById("helperText"),
@@ -27,6 +28,7 @@ const appState = {
   phase: ROLL_STATES.IDLE,
   tone: "neutral",
   outcome: null,
+  pointerInsideStage: false,
 };
 
 let scene;
@@ -37,6 +39,12 @@ let dicePivot;
 let diceObject;
 let animationFrameId;
 let rollAnimation = null;
+const pointerInfluence = {
+  currentX: 0,
+  currentY: 0,
+  targetX: 0,
+  targetY: 0,
+};
 
 const outcomeToFaceIndex = [
   0, 1, 2, 3, 4,
@@ -119,6 +127,11 @@ function setupDiceContainer() {
 function setupEvents() {
   window.addEventListener("resize", resizeRenderer);
   ui.rollButton.addEventListener("click", beginRollSequence);
+  ui.diceStage.addEventListener("click", beginRollSequence);
+  ui.diceStage.addEventListener("pointermove", handleStagePointerMove);
+  ui.diceStage.addEventListener("pointerenter", handleStagePointerEnter);
+  ui.diceStage.addEventListener("pointerleave", handleStagePointerLeave);
+  window.addEventListener("keydown", handleKeyRoll);
 }
 
 function resizeRenderer() {
@@ -201,9 +214,10 @@ function beginRollSequence() {
 
   appState.outcome = outcome;
   setPhase(ROLL_STATES.ROLLING, "neutral");
+  ui.diceStage.classList.remove("is-armed");
 
   ui.rollButton.disabled = true;
-  ui.helperText.textContent = "The die tumbles through shadow...";
+  ui.helperText.textContent = "The die rattles across the table...";
   ui.resultOverlay.classList.remove("is-visible");
 
   playRollAudioCue();
@@ -241,13 +255,21 @@ function animate() {
   animationFrameId = requestAnimationFrame(animate);
   const elapsed = clock.getElapsedTime();
 
+  pointerInfluence.currentX += (pointerInfluence.targetX - pointerInfluence.currentX) * 0.08;
+  pointerInfluence.currentY += (pointerInfluence.targetY - pointerInfluence.currentY) * 0.08;
+
   if (rollAnimation) {
     updateRollAnimation();
-    camera.position.x = Math.sin(elapsed * 0.7) * 0.08;
-    camera.position.y = 0.92 + Math.cos(elapsed * 0.6) * 0.04;
+    camera.position.x = Math.sin(elapsed * 0.7) * 0.08 + pointerInfluence.currentX * 0.12;
+    camera.position.y = 0.92 + Math.cos(elapsed * 0.6) * 0.04 + pointerInfluence.currentY * 0.05;
     camera.lookAt(0, 0, 0);
   } else {
     dicePivot.rotation.y += 0.0025;
+    dicePivot.rotation.x = THREE.MathUtils.lerp(dicePivot.rotation.x, pointerInfluence.currentY * 0.2, 0.06);
+    dicePivot.rotation.z = THREE.MathUtils.lerp(dicePivot.rotation.z, -pointerInfluence.currentX * 0.16, 0.06);
+    camera.position.x = THREE.MathUtils.lerp(camera.position.x, pointerInfluence.currentX * 0.18, 0.05);
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, 0.95 + pointerInfluence.currentY * 0.08, 0.05);
+    camera.lookAt(pointerInfluence.currentX * 0.12, pointerInfluence.currentY * 0.08, 0);
   }
 
   renderer.render(scene, camera);
@@ -316,7 +338,7 @@ function buildOutcomeLine(outcome) {
 function helperTextForOutcome(outcome) {
   if (outcome === 20) return "Triumph. The chamber hums with power.";
   if (outcome === 1) return "A grim silence follows.";
-  return "Take a breath and cast again.";
+  return "Hover the die and cast again.";
 }
 
 function addHistoryEntry(outcome) {
@@ -334,6 +356,47 @@ function setPhase(phase, tone = appState.tone) {
   appState.tone = tone;
   document.body.dataset.state = phase;
   document.body.dataset.tone = tone;
+}
+
+function handleStagePointerEnter() {
+  appState.pointerInsideStage = true;
+  if (appState.phase !== ROLL_STATES.ROLLING) {
+    ui.diceStage.classList.add("is-armed");
+    ui.helperText.textContent = "The die is within reach. Click the stage to roll.";
+  }
+}
+
+function handleStagePointerMove(event) {
+  const rect = ui.diceStage.getBoundingClientRect();
+  const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
+
+  pointerInfluence.targetX = THREE.MathUtils.clamp(nx, -1, 1);
+  pointerInfluence.targetY = THREE.MathUtils.clamp(-ny, -1, 1);
+}
+
+function handleStagePointerLeave() {
+  appState.pointerInsideStage = false;
+  ui.diceStage.classList.remove("is-armed");
+  pointerInfluence.targetX = 0;
+  pointerInfluence.targetY = 0;
+
+  if (appState.phase !== ROLL_STATES.ROLLING) {
+    ui.helperText.textContent = appState.outcome
+      ? "Take a breath and cast again."
+      : "Click the die or press the button to tempt fate.";
+  }
+}
+
+function handleKeyRoll(event) {
+  if (event.repeat) {
+    return;
+  }
+
+  if (event.code === "Space" || event.code === "Enter") {
+    event.preventDefault();
+    beginRollSequence();
+  }
 }
 
 function easeOutCubic(t) {
@@ -383,4 +446,5 @@ function createTone(frequency, attack, release, type, delaySeconds = 0) {
 
 window.addEventListener("beforeunload", () => {
   cancelAnimationFrame(animationFrameId);
+  window.removeEventListener("keydown", handleKeyRoll);
 });

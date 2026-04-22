@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fate Check | d20</title>
   <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
   <div class="screen-vignette" aria-hidden="true"></div>
@@ -29,7 +37,7 @@
 
     <section class="controls">
       <button id="rollButton" type="button">Roll d20</button>
-      <p id="helperText" class="helper-text">Ready when you are.</p>
+      <p id="helperText" class="helper-text">Click the die or press the button to tempt fate.</p>
     </section>
 
     <section class="history-panel" aria-label="Recent rolls">

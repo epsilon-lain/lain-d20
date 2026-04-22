@@ -82,6 +82,9 @@ h1 {
     0 22px 60px rgba(0, 0, 0, 0.58),
     inset 0 0 64px rgba(97, 120, 255, 0.09);
   overflow: hidden;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 220ms ease, border-color 220ms ease;
+  transform-style: preserve-3d;
 }
 
 .three-canvas {
@@ -183,6 +186,13 @@ h1 {
   min-height: 1.4em;
 }
 
+.dice-stage.is-armed {
+  border-color: rgba(214, 183, 96, 0.48);
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, 0.62),
+    inset 0 0 82px rgba(132, 155, 255, 0.14);
+}
+
 .history-panel {
   width: min(420px, 90vw);
   background: var(--panel);
@@ -221,6 +231,11 @@ body[data-state="rolling"] .dice-stage {
     0 0 32px rgba(125, 145, 255, 0.24),
     0 30px 60px rgba(0, 0, 0, 0.62),
     inset 0 0 72px rgba(124, 144, 253, 0.12);
+}
+
+body[data-state="rolling"] .dice-stage,
+body[data-state="reveal"] .dice-stage {
+  cursor: wait;
 }
 
 body[data-state="reveal"] .result-overlay {
