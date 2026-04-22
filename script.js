@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const ROLL_STATES = Object.freeze({
   IDLE: "idle",
@@ -10,7 +9,6 @@ const ROLL_STATES = Object.freeze({
 
 const ROLL_DURATION_MS = 2400;
 const REVEAL_DELAY_MS = 240;
-const FACE_CALIBRATION_EULER = new THREE.Euler(0, 0, 0);
 
 const ui = {
   diceStage: document.querySelector(".dice-stage"),
@@ -37,6 +35,7 @@ let renderer;
 let clock;
 let dicePivot;
 let diceObject;
+let topFaceLabel;
 let animationFrameId;
 let rollAnimation = null;
 const pointerInfluence = {
@@ -144,64 +143,91 @@ function resizeRenderer() {
 }
 
 function loadLocalDieModel() {
-  const loader = new GLTFLoader();
-  const modelPath = "./assets/d20-gold_edition_free.glb";
+  ui.loadStatus.textContent = "Forging a calibrated die...";
+  buildProceduralDie();
 
-  ui.loadStatus.textContent = `Summoning die model: ${modelPath}`;
-
-  loader.load(
-    modelPath,
-    (gltf) => {
-      attachLoadedDie(gltf.scene);
-      ui.loadStatus.textContent = "Die model loaded.";
-      setTimeout(() => {
-        if (appState.phase === ROLL_STATES.IDLE) {
-          ui.loadStatus.textContent = "";
-        }
-      }, 900);
-    },
-    undefined,
-    (error) => {
-      handleModelLoadFailure(error);
-    },
-  );
+  setTimeout(() => {
+    if (appState.phase === ROLL_STATES.IDLE) {
+      ui.loadStatus.textContent = "";
+    }
+  }, 500);
 }
 
-function attachLoadedDie(modelScene) {
+function buildProceduralDie() {
   if (diceObject) {
     dicePivot.remove(diceObject);
   }
 
-  const model = modelScene.clone(true);
-  const box = new THREE.Box3().setFromObject(model);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const largest = Math.max(size.x, size.y, size.z) || 1;
+  const dieGroup = new THREE.Group();
 
-  model.position.sub(center);
-  model.scale.setScalar(1.8 / largest);
-  model.rotation.copy(FACE_CALIBRATION_EULER);
-
-  diceObject = model;
-  dicePivot.add(diceObject);
-}
-
-function handleModelLoadFailure(error) {
-  console.error("D20 model failed to load.", error);
-  ui.loadStatus.textContent = "Model unavailable. Using fallback die geometry.";
-
-  diceObject = new THREE.Mesh(
+  const core = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1, 0),
     new THREE.MeshStandardMaterial({
-      color: 0xbda062,
-      emissive: 0x111111,
-      roughness: 0.33,
-      metalness: 0.58,
+      color: 0xb38a39,
+      emissive: 0x080808,
+      roughness: 0.34,
+      metalness: 0.82,
       flatShading: true,
     }),
   );
 
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(core.geometry),
+    new THREE.LineBasicMaterial({ color: 0xf1d287, transparent: true, opacity: 0.95 }),
+  );
+
+  dieGroup.add(core);
+  dieGroup.add(edges);
+  topFaceLabel = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createFaceLabelTexture(20),
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+    }),
+  );
+  topFaceLabel.scale.setScalar(0.52);
+  dieGroup.add(topFaceLabel);
+  setTopFaceLabel(20);
+
+  diceObject = dieGroup;
   dicePivot.add(diceObject);
+}
+
+function createFaceLabelTexture(value) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#f5e4af";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "700 128px Georgia, 'Times New Roman', serif";
+  ctx.fillText(String(value), canvas.width / 2, canvas.height / 2);
+
+  if (value === 6 || value === 9) {
+    ctx.beginPath();
+    ctx.fillStyle = "#f5e4af";
+    ctx.arc(canvas.width / 2, canvas.height / 2 + 62, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function setTopFaceLabel(value) {
+  if (!topFaceLabel) {
+    return;
+  }
+
+  const faceNormal = icosaFaceNormals[outcomeToFaceIndex[value - 1]];
+  topFaceLabel.material.map = createFaceLabelTexture(value);
+  topFaceLabel.material.needsUpdate = true;
+  topFaceLabel.position.copy(faceNormal).multiplyScalar(1.02);
 }
 
 function beginRollSequence() {
@@ -215,6 +241,7 @@ function beginRollSequence() {
   appState.outcome = outcome;
   setPhase(ROLL_STATES.ROLLING, "neutral");
   ui.diceStage.classList.remove("is-armed");
+  setTopFaceLabel(outcome);
 
   ui.rollButton.disabled = true;
   ui.helperText.textContent = "The die rattles across the table...";
