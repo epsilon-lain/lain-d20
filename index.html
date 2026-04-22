@@ -3,27 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>lain d20 roller</title>
+  <title>Fate Check | d20</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>🎲 lain's d20 roller</h1>
-    <p class="subtitle">Roll the die and let fate decide.</p>
+  <div class="screen-vignette" aria-hidden="true"></div>
 
-    <div class="dice-box">
-      <div id="result">?</div>
-    </div>
+  <main class="scene-shell">
+    <header class="title-block">
+      <p class="eyebrow">Ritual of Chance</p>
+      <h1>Fate Check</h1>
+      <p class="subtitle">Steel your resolve, then cast the die.</p>
+    </header>
 
-    <button id="rollButton">Roll d20</button>
-    <p id="message">Press the button to roll.</p>
+    <section class="dice-stage" aria-label="3D d20 scene">
+      <div id="threeCanvas" class="three-canvas"></div>
+      <div id="loadStatus" class="load-status" role="status" aria-live="polite"></div>
 
-    <div class="history-box">
-      <h2>Recent Rolls</h2>
+      <div id="resultOverlay" class="result-overlay" data-tone="neutral">
+        <p class="result-label">Result</p>
+        <p id="resultValue" class="result-value">—</p>
+        <p id="resultMessage" class="result-message">Roll to let fate decide.</p>
+      </div>
+    </section>
+
+    <section class="controls">
+      <button id="rollButton" type="button">Roll d20</button>
+      <p id="helperText" class="helper-text">Ready when you are.</p>
+    </section>
+
+    <section class="history-panel" aria-label="Recent rolls">
+      <h2>Recent</h2>
       <ul id="history"></ul>
-    </div>
-  </div>
+    </section>
+  </main>
 
-  <script src="script.js"></script>
+  <script type="module" src="script.js"></script>
 </body>
 </html>
