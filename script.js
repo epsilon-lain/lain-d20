@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const ROLL_STATES = Object.freeze({
   IDLE: "idle",
@@ -9,6 +10,43 @@ const ROLL_STATES = Object.freeze({
 
 const ROLL_DURATION_MS = 2400;
 const REVEAL_DELAY_MS = 240;
+
+// These normals were extracted from the original GLB so the visible face
+// matches the rolled value instead of relying on a generic icosahedron layout.
+const MODEL_FACES = [
+  { value: 7, normal: [0.0, 0.794865, -0.606787] },
+  { value: 17, normal: [0.581414, 0.791908, -0.186655] },
+  { value: 12, normal: [-0.581414, 0.791908, -0.186655] },
+  { value: 15, normal: [0.354167, 0.789556, 0.501166] },
+  { value: 10, normal: [-0.354167, 0.789556, 0.501166] },
+  { value: 1, normal: [0.0, 0.187931, -0.982182] },
+  { value: 5, normal: [0.581414, 0.186656, 0.791907] },
+  { value: 8, normal: [-0.581414, 0.186656, 0.791907] },
+  { value: 2, normal: [0.935417, 0.185973, -0.300679] },
+  { value: 3, normal: [-0.935417, 0.185973, -0.300679] },
+  { value: 18, normal: [0.935418, -0.185973, 0.300679] },
+  { value: 19, normal: [-0.935418, -0.185973, 0.300679] },
+  { value: 13, normal: [0.581414, -0.186656, -0.791907] },
+  { value: 16, normal: [-0.581414, -0.186656, -0.791907] },
+  { value: 20, normal: [0.0, -0.187931, 0.982182] },
+  { value: 11, normal: [0.36012, -0.793408, -0.490732] },
+  { value: 6, normal: [-0.36012, -0.793408, -0.490732] },
+  { value: 14, normal: [0.0, -0.794864, 0.606787] },
+  { value: 4, normal: [0.571845, -0.799558, 0.183576] },
+  { value: 9, normal: [-0.571845, -0.799558, 0.183576] },
+].map(({ value, normal }) => ({
+  value,
+  normal: new THREE.Vector3(...normal).normalize(),
+}));
+
+const FACE_NORMAL_BY_VALUE = new Map(
+  MODEL_FACES.map(({ value, normal }) => [value, normal]),
+);
+
+const SHOWCASE_VALUE = 20;
+const PRESENTATION_DIRECTION = new THREE.Vector3(0.02, 0.55, 0.835).normalize();
+const BASE_CAMERA_POSITION = new THREE.Vector3(0, 0.95, 4.6);
+const BASE_LOOK_AT = new THREE.Vector3(0, 0, 0);
 
 const ui = {
   diceStage: document.querySelector(".dice-stage"),
@@ -35,7 +73,6 @@ let renderer;
 let clock;
 let dicePivot;
 let diceObject;
-let topFaceLabel;
 let animationFrameId;
 let rollAnimation = null;
 const pointerInfluence = {
@@ -45,26 +82,7 @@ const pointerInfluence = {
   targetY: 0,
 };
 
-const outcomeToFaceIndex = [
-  0, 1, 2, 3, 4,
-  5, 6, 7, 8, 9,
-  10, 11, 12, 13, 14,
-  15, 16, 17, 18, 19,
-];
-
-const icosaFaceNormals = [
-  [0, 1, PHI()], [0, -1, PHI()], [0, 1, -PHI()], [0, -1, -PHI()],
-  [1, PHI(), 0], [-1, PHI(), 0], [1, -PHI(), 0], [-1, -PHI(), 0],
-  [PHI(), 0, 1], [PHI(), 0, -1], [-PHI(), 0, 1], [-PHI(), 0, -1],
-  [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
-  [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
-].map(([x, y, z]) => new THREE.Vector3(x, y, z).normalize());
-
 init();
-
-function PHI() {
-  return (1 + Math.sqrt(5)) / 2;
-}
 
 function init() {
   setupScene();
@@ -82,8 +100,8 @@ function setupScene() {
   scene.fog = new THREE.Fog(0x080a14, 7, 16);
 
   camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-  camera.position.set(0, 0.95, 4.6);
-  camera.lookAt(0, 0, 0);
+  camera.position.copy(BASE_CAMERA_POSITION);
+  camera.lookAt(BASE_LOOK_AT);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -143,91 +161,81 @@ function resizeRenderer() {
 }
 
 function loadLocalDieModel() {
-  ui.loadStatus.textContent = "Forging a calibrated die...";
-  buildProceduralDie();
+  const loader = new GLTFLoader();
+  const modelPath = "./assets/d20-gold_edition_free.glb";
 
-  setTimeout(() => {
-    if (appState.phase === ROLL_STATES.IDLE) {
-      ui.loadStatus.textContent = "";
-    }
-  }, 500);
+  ui.loadStatus.textContent = `Summoning die model: ${modelPath}`;
+
+  loader.load(
+    modelPath,
+    (gltf) => {
+      attachLoadedDie(gltf.scene);
+      ui.loadStatus.textContent = "Die model loaded.";
+
+      if (diceObject) {
+        dicePivot.quaternion.copy(getTargetQuaternionForValue(SHOWCASE_VALUE));
+      }
+
+      setTimeout(() => {
+        if (appState.phase === ROLL_STATES.IDLE) {
+          ui.loadStatus.textContent = "";
+        }
+      }, 900);
+    },
+    undefined,
+    (error) => {
+      handleModelLoadFailure(error);
+    },
+  );
 }
 
-function buildProceduralDie() {
+function attachLoadedDie(modelScene) {
   if (diceObject) {
     dicePivot.remove(diceObject);
   }
 
-  const dieGroup = new THREE.Group();
+  const model = modelScene.clone(true);
+  const solidMeshes = [];
 
-  const core = new THREE.Mesh(
+  model.traverse((node) => {
+    if (node.isMesh && !node.name.includes("letters")) {
+      solidMeshes.push(node);
+    }
+  });
+
+  const box = new THREE.Box3();
+  solidMeshes.forEach((mesh) => {
+    box.expandByObject(mesh);
+  });
+
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const largest = Math.max(size.x, size.y, size.z) || 1;
+
+  model.position.sub(center);
+  model.scale.setScalar(1.8 / largest);
+
+  diceObject = model;
+  dicePivot.add(diceObject);
+}
+
+function handleModelLoadFailure(error) {
+  console.error("D20 model failed to load.", error);
+  ui.loadStatus.textContent = "Model unavailable. Using fallback die geometry.";
+
+  diceObject = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1, 0),
     new THREE.MeshStandardMaterial({
-      color: 0xb38a39,
-      emissive: 0x080808,
-      roughness: 0.34,
-      metalness: 0.82,
+      color: 0xbda062,
+      emissive: 0x111111,
+      roughness: 0.33,
+      metalness: 0.58,
       flatShading: true,
     }),
   );
 
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(core.geometry),
-    new THREE.LineBasicMaterial({ color: 0xf1d287, transparent: true, opacity: 0.95 }),
-  );
-
-  dieGroup.add(core);
-  dieGroup.add(edges);
-  topFaceLabel = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      map: createFaceLabelTexture(20),
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-    }),
-  );
-  topFaceLabel.scale.setScalar(0.52);
-  dieGroup.add(topFaceLabel);
-  setTopFaceLabel(20);
-
-  diceObject = dieGroup;
   dicePivot.add(diceObject);
-}
-
-function createFaceLabelTexture(value) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 256;
-
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#f5e4af";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "700 128px Georgia, 'Times New Roman', serif";
-  ctx.fillText(String(value), canvas.width / 2, canvas.height / 2);
-
-  if (value === 6 || value === 9) {
-    ctx.beginPath();
-    ctx.fillStyle = "#f5e4af";
-    ctx.arc(canvas.width / 2, canvas.height / 2 + 62, 8, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-function setTopFaceLabel(value) {
-  if (!topFaceLabel) {
-    return;
-  }
-
-  const faceNormal = icosaFaceNormals[outcomeToFaceIndex[value - 1]];
-  topFaceLabel.material.map = createFaceLabelTexture(value);
-  topFaceLabel.material.needsUpdate = true;
-  topFaceLabel.position.copy(faceNormal).multiplyScalar(1.02);
+  dicePivot.quaternion.copy(getTargetQuaternionForValue(SHOWCASE_VALUE));
 }
 
 function beginRollSequence() {
@@ -236,12 +244,11 @@ function beginRollSequence() {
   }
 
   const outcome = rollOutcome();
-  const targetQuaternion = getTargetQuaternionForOutcome(outcome);
+  const targetQuaternion = getTargetQuaternionForValue(outcome);
 
   appState.outcome = outcome;
   setPhase(ROLL_STATES.ROLLING, "neutral");
   ui.diceStage.classList.remove("is-armed");
-  setTopFaceLabel(outcome);
 
   ui.rollButton.disabled = true;
   ui.helperText.textContent = "The die rattles across the table...";
@@ -265,17 +272,36 @@ function rollOutcome() {
   return Math.floor(Math.random() * 20) + 1;
 }
 
-function getTargetQuaternionForOutcome(outcome) {
-  const faceNormal = icosaFaceNormals[outcomeToFaceIndex[outcome - 1]];
-  const up = new THREE.Vector3(0, 1, 0);
-  const align = new THREE.Quaternion().setFromUnitVectors(faceNormal, up);
-
-  const spinAroundTop = new THREE.Quaternion().setFromAxisAngle(
-    up,
-    ((outcome * 137.5) % 360) * (Math.PI / 180),
+function getTargetQuaternionForValue(value) {
+  const faceNormal = FACE_NORMAL_BY_VALUE.get(value) || FACE_NORMAL_BY_VALUE.get(SHOWCASE_VALUE);
+  const align = new THREE.Quaternion().setFromUnitVectors(
+    faceNormal,
+    PRESENTATION_DIRECTION,
   );
 
-  return spinAroundTop.multiply(align);
+  const spinAroundFace = new THREE.Quaternion().setFromAxisAngle(
+    PRESENTATION_DIRECTION,
+    ((value * 137.5) % 360) * (Math.PI / 180),
+  );
+
+  return spinAroundFace.multiply(align);
+}
+
+function getPresentedValueFromQuaternion(quaternion) {
+  let bestValue = SHOWCASE_VALUE;
+  let bestDot = -Infinity;
+
+  for (const { value, normal } of MODEL_FACES) {
+    const orientedNormal = normal.clone().applyQuaternion(quaternion);
+    const alignment = orientedNormal.dot(PRESENTATION_DIRECTION);
+
+    if (alignment > bestDot) {
+      bestDot = alignment;
+      bestValue = value;
+    }
+  }
+
+  return bestValue;
 }
 
 function animate() {
@@ -287,16 +313,25 @@ function animate() {
 
   if (rollAnimation) {
     updateRollAnimation();
-    camera.position.x = Math.sin(elapsed * 0.7) * 0.08 + pointerInfluence.currentX * 0.12;
-    camera.position.y = 0.92 + Math.cos(elapsed * 0.6) * 0.04 + pointerInfluence.currentY * 0.05;
-    camera.lookAt(0, 0, 0);
+    camera.position.x = Math.sin(elapsed * 0.7) * 0.08 + pointerInfluence.currentX * 0.08;
+    camera.position.y = 0.9 + Math.cos(elapsed * 0.6) * 0.04 + pointerInfluence.currentY * 0.04;
+    camera.lookAt(BASE_LOOK_AT);
+  } else if (appState.phase === ROLL_STATES.IDLE) {
+    camera.position.x = THREE.MathUtils.lerp(
+      camera.position.x,
+      BASE_CAMERA_POSITION.x + pointerInfluence.currentX * 0.12,
+      0.05,
+    );
+    camera.position.y = THREE.MathUtils.lerp(
+      camera.position.y,
+      BASE_CAMERA_POSITION.y + pointerInfluence.currentY * 0.05,
+      0.05,
+    );
+    camera.position.z = THREE.MathUtils.lerp(camera.position.z, BASE_CAMERA_POSITION.z, 0.05);
+    camera.lookAt(pointerInfluence.currentX * 0.06, pointerInfluence.currentY * 0.04, 0);
   } else {
-    dicePivot.rotation.y += 0.0025;
-    dicePivot.rotation.x = THREE.MathUtils.lerp(dicePivot.rotation.x, pointerInfluence.currentY * 0.2, 0.06);
-    dicePivot.rotation.z = THREE.MathUtils.lerp(dicePivot.rotation.z, -pointerInfluence.currentX * 0.16, 0.06);
-    camera.position.x = THREE.MathUtils.lerp(camera.position.x, pointerInfluence.currentX * 0.18, 0.05);
-    camera.position.y = THREE.MathUtils.lerp(camera.position.y, 0.95 + pointerInfluence.currentY * 0.08, 0.05);
-    camera.lookAt(pointerInfluence.currentX * 0.12, pointerInfluence.currentY * 0.08, 0);
+    camera.position.copy(BASE_CAMERA_POSITION);
+    camera.lookAt(BASE_LOOK_AT);
   }
 
   renderer.render(scene, camera);
@@ -305,14 +340,15 @@ function animate() {
 function updateRollAnimation() {
   const t = Math.min((performance.now() - rollAnimation.start) / rollAnimation.duration, 1);
   const eased = easeOutCubic(t);
-  const spinScale = 1 - eased * 0.8;
+  const spinScale = 1 - eased * 0.82;
 
   dicePivot.rotation.x += 0.15 * rollAnimation.spin.x * 0.002 * spinScale;
   dicePivot.rotation.y += 0.15 * rollAnimation.spin.y * 0.0023 * spinScale;
   dicePivot.rotation.z += 0.15 * rollAnimation.spin.z * 0.0019 * spinScale;
 
-  if (t > 0.45) {
-    dicePivot.quaternion.slerp(rollAnimation.targetQuaternion, ((t - 0.45) / 0.55) * 0.14);
+  if (t > 0.42) {
+    const settle = easeOutCubic((t - 0.42) / 0.58);
+    dicePivot.quaternion.slerp(rollAnimation.targetQuaternion, settle * 0.16);
   }
 
   if (t >= 0.92 && appState.phase === ROLL_STATES.ROLLING) {
@@ -324,6 +360,13 @@ function updateRollAnimation() {
 
   if (t >= 1) {
     dicePivot.quaternion.copy(rollAnimation.targetQuaternion);
+    appState.outcome = getPresentedValueFromQuaternion(dicePivot.quaternion);
+    pointerInfluence.currentX = 0;
+    pointerInfluence.currentY = 0;
+    pointerInfluence.targetX = 0;
+    pointerInfluence.targetY = 0;
+    camera.position.copy(BASE_CAMERA_POSITION);
+    camera.lookAt(BASE_LOOK_AT);
     rollAnimation = null;
     setPhase(ROLL_STATES.REVEAL, resolveTone(appState.outcome));
 
